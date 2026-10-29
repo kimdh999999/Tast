@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Alphabet Sign Language (MediaPipe + KNN)</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: #000;
+      color: #fff;
+      font-family: sans-serif;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    #container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+    #webcam {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+    }
+    #canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+    }
+    #sentence-overlay {
+      position: absolute;
+      bottom: 30px;
+      left: 20px;
+      right: 20px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 12px 18px;
+      border-radius: 12px;
+      font-size: 24px;
+      font-weight: bold;
+      color: #00FF66;
+      border: 1px solid #333;
+      z-index: 10;
+      pointer-events: none;
+      word-break: break-all;
+    }
+    #status-overlay {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 14px;
+      color: #00E5FF;
+      border: 1px solid #333;
+      z-index: 10;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="container">
+    <video id="webcam" playsinline autoplay muted></video>
+    <canvas id="canvas"></canvas>
+    <div id="status-overlay">초기화 중...</div>
+    <div id="sentence-overlay">문장: <span id="sentence-text"></span></div>
+  </div>
+
+  <!-- MediaPipe Tasks Vision -->
+  <script type="module" crossorigin="anonymous">
+    import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+    // 1. gesture dictionary (파이썬 코드와 동일)
+    const gesture = {
+      0:'a', 1:'b', 2:'c', 3:'d', 4:'e', 5:'f', 6:'g', 7:'h',
+      8:'i', 9:'j', 10:'k', 11:'l', 12:'m', 13:'n', 14:'o',
+      15:'p', 16:'q', 17:'r', 18:'s', 19:'t', 20:'u', 21:'v',
+      22:'w', 23:'x', 24:'y', 25:'z', 26:'spacing', 27:'clear'
+    };
+
+    // 2. dataSet.txt 로드 (파이썬: file = np.genfromtxt('dataSet.txt', delimiter=','))
+    let angleFile = [];
+    let labelFile = [];
+
+    async function loadDataset() {
+      try {
+        const res = await fetch('dataSet.txt');
+        const text = await res.text();
+        const lines = text.trim().split('\n');
+        for (let line of lines) {
+          line = line.trim().replace(/['"]/g, '');
+          if (!line) continue;
+          const nums = line.split(',').map(Number);
+          if (nums.length === 16 && !nums.some(isNaN)) {
+            angleFile.push(nums.slice(0, 15));
+            labelFile.push(Math.round(nums[15]));
+          }
+        }
+        document.getElementById('status-overlay').textContent = `데이터셋 로드 완료 (${angleFile.length}개) | 손을 보여주세요`;
+      } catch (e) {
+        console.error('데이터셋 로드 실패:', e);
+        document.getElementById('status-overlay').textContent = '데이터셋 로드 실패';
+      }
+    }
+
+    // 3. KNN k=3 (파이썬: ret, results, neighbours, dist = knn.findNearest(data, 3))
+    function knnFindNearest(queryAngle, k = 3) {
+      if (angleFile.length === 0) return 0;
+      let dists = [];
+      for (let i = 0; i < angleFile.length; i++) {
+        const row = angleFile[i];
+        let d = 0;
+        for (let j = 0; j < 15; j++) {
+          const diff = queryAngle[j] - row[j];
+          d += diff * diff;
+        }
+        dists.push({ dist: d, label: labelFile[i] });
+      }
+      dists.sort((a, b) => a.dist - b.dist);
+      const topK = dists.slice(0, k);
+
+      const votes = {};
+      for (let item of topK) {
+        votes[item.label] = (votes[item.label] || 0) + 1;
+      }
+      let best = topK[0].label;
+      let maxVotes = 0;
+      for (let lbl in votes) {
+        if (votes[lbl] > maxVotes) {
+          maxVotes = votes[lbl];
+          best = Number(lbl);
+        }
+      }
+      return best;
+    }
+
+    // 4. 관절 인덱스 및 연결선 (파이썬 코드와 동일)
+    const v1_idx = [0, 1, 2, 3, 0, 5, 6, 7, 0, 9, 10, 11, 0, 13, 14, 15, 0, 17, 18, 19];
+    const v2_idx = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+    const compareV1 = [0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 16, 17];
+    const compareV2 = [1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 17, 18];
+
+    const HAND_CONNECTIONS = [
+      [0, 1], [1, 2], [2, 3], [3, 4],
+      [0, 5], [5, 6], [6, 7], [7, 8],
+      [0, 9], [9, 10], [10, 11], [11, 12],
+      [0, 13], [13, 14], [14, 15], [15, 16],
+      [0, 17], [17, 18], [18, 19], [19, 20],
+      [5, 9], [9, 13], [13, 17], [0, 17]
+    ];
+
+    // 5. 파이썬 상태 변수 (파이썬 코드와 동일)
+    let startTime = Date.now() / 1000;
+    let prev_index = 0;
+    let sentence = '';
+    const recognizeDelay = 1; // 1초
+
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const sentenceTextEl = document.getElementById('sentence-text');
+    let handLandmarker = null;
+
+    // 파이썬 cv2.putText 대응 함수 (미러링 화면에서도 글자가 똑바로 보이도록 처리)
+    function putText(text, x, y, size = 32, color = "#FFFFFF") {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(-1, 1);
+      ctx.font = `bold ${size}px Arial`;
+      ctx.fillStyle = color;
+      ctx.strokeStyle = "#000000";
+      ctx.lineWidth = 3;
+      ctx.strokeText(text, 0, 0);
+      ctx.fillText(text, 0, 0);
+      ctx.restore();
+    }
+
+    // 6. 메인 루프 (파이썬: while True:)
+    function onFrame() {
+      if (video.videoWidth && (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight)) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      }
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (handLandmarker && video.readyState >= 2) {
+        const result = handLandmarker.detectForVideo(video, performance.now());
+        if (result && result.landmarks && result.landmarks.length > 0) {
+          for (let res of result.landmarks) {
+            // joint = np.zeros((21, 3))
+            const joint = res.map(lm => [lm.x, lm.y, lm.z || 0]);
+
+            // v1, v2 및 단위 벡터 v
+            const v = [];
+            for (let i = 0; i < 20; i++) {
+              const p1 = joint[v1_idx[i]];
+              const p2 = joint[v2_idx[i]];
+              const dx = p2[0] - p1[0];
+              const dy = p2[1] - p1[1];
+              const dz = p2[2] - p1[2];
+              const norm = Math.hypot(dx, dy, dz) || 1e-7;
+              v.push([dx / norm, dy / norm, dz / norm]);
+            }
+
+            // angle 계산
+            const angle = [];
+            const RAD_TO_DEG = 180.0 / Math.PI;
+            for (let i = 0; i < 15; i++) {
+              const u = v[compareV1[i]];
+              const w = v[compareV2[i]];
+              const dot = u[0]*w[0] + u[1]*w[1] + u[2]*w[2];
+              const clamped = Math.max(-1.0, Math.min(1.0, dot));
+              angle.push(Math.acos(clamped) * RAD_TO_DEG);
+            }
+
+            // knn 분류
+            const index = knnFindNearest(angle, 3);
+
+            // 1초 누적 로직 (파이썬과 100% 동일)
+            const currentTime = Date.now() / 1000;
+            if (index in gesture) {
+              if (index !== prev_index) {
+                startTime = currentTime;
+                prev_index = index;
+              } else {
+                if (currentTime - startTime > recognizeDelay) {
+                  if (index === 26) {
+                    sentence += ' ';
+                  } else if (index === 27) {
+                    sentence = '';
+                  } else {
+                    sentence += gesture[index];
+                  }
+                  startTime = currentTime;
+
+                  // 앱 인벤터 전송
+                  if (window.AppInventor && window.AppInventor.setWebViewString) {
+                    window.AppInventor.setWebViewString(sentence);
+                  }
+                  sentenceTextEl.textContent = sentence;
+                }
+              }
+
+              // cv2.putText(img, gesture[index].upper(), (res.landmark[0].x * w - 10, res.landmark[0].y * h + 40))
+              const wristX = res[0].x * canvas.width - 10;
+              const wristY = res[0].y * canvas.height + 40;
+              putText(gesture[index].toUpperCase(), wristX, wristY, 36, "#FFFFFF");
+            }
+
+            // mp_drawing.draw_landmarks(img, res, mp_hands.HAND_CONNECTIONS)
+            ctx.strokeStyle = "#00FF66";
+            ctx.lineWidth = 3;
+            for (let conn of HAND_CONNECTIONS) {
+              ctx.beginPath();
+              ctx.moveTo(res[conn[0]].x * canvas.width, res[conn[0]].y * canvas.height);
+              ctx.lineTo(res[conn[1]].x * canvas.width, res[conn[1]].y * canvas.height);
+              ctx.stroke();
+            }
+            ctx.fillStyle = "#FFFFFF";
+            for (let pt of res) {
+              ctx.beginPath();
+              ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 4, 0, 2 * Math.PI);
+              ctx.fill();
+            }
+          }
+
+          // cv2.putText(img, sentence, (20, 440))
+          putText(sentence, canvas.width / 2, canvas.height - 40, 32, "#00FF66");
+        }
+      }
+
+      requestAnimationFrame(onFrame);
+    }
+
+    // 7. 시작 및 초기화
+    async function init() {
+      await loadDataset();
+
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+      );
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          delegate: "GPU"
+        },
+        runningMode: "VIDEO",
+        numHands: 1
+      });
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }
+      });
+      video.srcObject = stream;
+      await video.play();
+
+      requestAnimationFrame(onFrame);
+    }
+
+    window.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>

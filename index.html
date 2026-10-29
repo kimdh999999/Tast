@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>MediaPipe 수화 인식 (정규화 3D + 원클릭 학습)</title>
+  <title>MediaPipe 수화 인식 </title>
   <style>
     * {
       box-sizing: border-box;
@@ -137,7 +137,7 @@
   <div id="bottom-bar">
     <span id="recognized-text"></span>
     <button id="clear-btn" class="btn">Clear</button>
-    <button id="train-toggle-btn" class="btn">+ 맞춤 학습</button>
+    <button id="train-toggle-btn" class="btn">+ add</button>
   </div>
 
   <!-- 옵션 2: 1초 만에 특정 알파벳 손모양 학습하는 패널 -->
@@ -153,7 +153,7 @@
       <option value="V">V</option><option value="W">W</option><option value="X">X</option>
       <option value="Y">Y</option><option value="Z">Z</option>
     </select>
-    <button id="train-capture-btn" class="btn">● 지금 손모양 20장 학습</button>
+    <button id="train-capture-btn" class="btn"> 손모양 20장 학습</button>
     <button id="train-reset-btn" class="panel-btn">초기화</button>
     <span id="train-status">학습 데이터: 0개</span>
   </div>
@@ -208,11 +208,11 @@
     trainCaptureBtn.addEventListener('click', () => {
       capturingLabel = trainCharSelect.value;
       captureRemaining = 20;
-      trainStatusEl.textContent = `[${capturingLabel}] 손모양 20장 캡처 중... 손 유지!`;
+      trainStatusEl.textContent = `[${capturingLabel}] 손모양 20장 캡처`;
     });
 
     trainResetBtn.addEventListener('click', () => {
-      if (confirm('모든 맞춤 학습 데이터를 삭제할까요?')) {
+      if (confirm('데이터를 삭제할까요?')) {
         customSamples = [];
         localStorage.removeItem('asl_custom_samples');
         updateTrainStatus();

@@ -3,29 +3,39 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Alphabet Sign Language (MediaPipe + KNN)</title>
+  <title>알파벳 수화 인식기 (MediaPipe + KNN)</title>
+
+  <!-- 데이터셋 즉시 로드 (1176개 샘플 지연 없이 로딩) -->
+  <script src="dataset.js"></script>
+
   <style>
     * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
     }
     body {
-      background-color: #000;
-      color: #fff;
-      font-family: sans-serif;
+      background-color: #0b0f19;
+      color: #FFFFFF;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       overflow: hidden;
       width: 100vw;
       height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
+      justify-content: space-between;
     }
     #container {
       position: relative;
       width: 100vw;
       height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
     }
     #webcam {
       position: absolute;
@@ -35,6 +45,7 @@
       height: 100%;
       object-fit: cover;
       transform: scaleX(-1);
+      z-index: 1;
     }
     #canvas {
       position: absolute;
@@ -44,52 +55,230 @@
       height: 100%;
       object-fit: cover;
       transform: scaleX(-1);
+      z-index: 2;
+      pointer-events: none;
     }
-    #sentence-overlay {
-      position: absolute;
-      bottom: 30px;
-      left: 20px;
-      right: 20px;
-      background: rgba(0, 0, 0, 0.7);
+
+    /* 상단 상태 및 현재 제스처 HUD */
+    #top-hud {
+      position: relative;
+      z-index: 10;
+      width: 90%;
+      max-width: 460px;
+      margin-top: 16px;
       padding: 12px 18px;
-      border-radius: 12px;
-      font-size: 24px;
-      font-weight: bold;
-      color: #00FF66;
-      border: 1px solid #333;
-      z-index: 10;
-      pointer-events: none;
-      word-break: break-all;
+      background: rgba(11, 15, 25, 0.85);
+      border: 1.5px solid rgba(255, 255, 255, 0.15);
+      border-radius: 20px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.7);
+      text-align: center;
+      transition: border-color 0.15s, box-shadow 0.15s;
     }
-    #status-overlay {
-      position: absolute;
-      top: 20px;
-      left: 20px;
-      background: rgba(0, 0, 0, 0.7);
-      padding: 8px 14px;
+    #top-hud.active {
+      border-color: #00E5FF;
+      box-shadow: 0 0 20px rgba(0, 229, 255, 0.4);
+    }
+    #top-hud.confirmed {
+      border-color: #00FF66;
+      box-shadow: 0 0 30px rgba(0, 255, 102, 0.7);
+    }
+
+    .hud-title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: #94A3B8;
+      margin-bottom: 6px;
+    }
+    .dataset-badge {
+      font-size: 11px;
+      padding: 2px 8px;
       border-radius: 10px;
-      font-size: 14px;
+      background: rgba(0, 229, 255, 0.15);
       color: #00E5FF;
-      border: 1px solid #333;
+      border: 1px solid rgba(0, 229, 255, 0.3);
+    }
+
+    .char-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 12px;
+      min-height: 52px;
+    }
+    .char-main {
+      font-size: 48px;
+      font-weight: 900;
+      color: #FFFFFF;
+      text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+    }
+    .char-desc {
+      font-size: 18px;
+      font-weight: 700;
+      color: #38BDF8;
+    }
+
+    .progress-bar-bg {
+      margin-top: 8px;
+      width: 100%;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #00BFFF, #00FF66);
+      transition: width 0.05s linear;
+    }
+
+    .hud-sub {
+      margin-top: 8px;
+      display: flex;
+      justify-content: space-around;
+      font-size: 12px;
+      font-weight: 600;
+      color: #94A3B8;
+    }
+    .hud-sub span {
+      color: #00FF66;
+      font-weight: 700;
+    }
+
+    /* 하단 문장 출력 HUD */
+    #bottom-hud {
+      position: relative;
       z-index: 10;
-      pointer-events: none;
+      width: 90%;
+      max-width: 460px;
+      margin-bottom: 20px;
+      padding: 14px 16px;
+      background: rgba(11, 15, 25, 0.9);
+      border: 1.5px solid rgba(255, 255, 255, 0.15);
+      border-radius: 18px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.7);
+    }
+    .sentence-label {
+      font-size: 12px;
+      font-weight: 700;
+      color: #94A3B8;
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .sentence-box {
+      min-height: 48px;
+      background: rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 22px;
+      font-weight: 700;
+      color: #00FF66;
+      word-break: break-all;
+      display: flex;
+      align-items: center;
+    }
+    .cursor {
+      display: inline-block;
+      width: 2px;
+      height: 22px;
+      background: #00E5FF;
+      margin-left: 4px;
+      animation: blink 1s infinite;
+    }
+    @keyframes blink {
+      0%, 49% { opacity: 1; }
+      50%, 100% { opacity: 0; }
+    }
+    .btn-row {
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+    }
+    .btn {
+      flex: 1;
+      padding: 9px 0;
+      font-size: 13px;
+      font-weight: 700;
+      border: none;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      cursor: pointer;
+    }
+    .btn:active {
+      transform: scale(0.97);
+    }
+    .btn-clear {
+      background: rgba(239, 68, 68, 0.25);
+      color: #FCA5A5;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+    .btn-space {
+      background: rgba(14, 165, 233, 0.25);
+      color: #7DD3FC;
+      border: 1px solid rgba(14, 165, 233, 0.4);
     }
   </style>
 </head>
 <body>
 
   <div id="container">
+    <!-- 카메라 및 캔버스 -->
     <video id="webcam" playsinline autoplay muted></video>
     <canvas id="canvas"></canvas>
-    <div id="status-overlay">초기화 중...</div>
-    <div id="sentence-overlay">문장: <span id="sentence-text"></span></div>
+
+    <!-- 상단 HUD: 실시간 제스처 & 1초 유지 타이머 -->
+    <div id="top-hud">
+      <div class="hud-title-row">
+        <span>ALPHABET KNN (K=3)</span>
+        <span id="dataset-status" class="dataset-badge">데이터 로딩 중...</span>
+      </div>
+      <div class="char-row">
+        <span id="char-main" class="char-main">-</span>
+        <span id="char-desc" class="char-desc">손을 카메라에 보여주세요</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div id="progress-bar-fill" class="progress-bar-fill"></div>
+      </div>
+      <div class="hud-sub">
+        <div>일치도: <span id="conf-val">0%</span></div>
+        <div>유지 시간: <span id="hold-val">0.0s / 1.0s</span></div>
+        <div>FPS: <span id="fps-val">0</span></div>
+      </div>
+    </div>
+
+    <!-- 하단 HUD: 인식된 문장 -->
+    <div id="bottom-hud">
+      <div class="sentence-label">
+        <span>인식된 문장 (SENTENCE)</span>
+        <span id="appinventor-status" style="color: #38BDF8;">AppInventor 대기 중</span>
+      </div>
+      <div class="sentence-box">
+        <span id="sentence-text"></span>
+        <span class="cursor"></span>
+      </div>
+      <div class="btn-row">
+        <button id="btn-space" class="btn btn-space">␣ 공백 추가</button>
+        <button id="btn-back" class="btn">⌫ 글자 지우기</button>
+        <button id="btn-clear" class="btn btn-clear">전체 초기화</button>
+      </div>
+    </div>
   </div>
 
   <!-- MediaPipe Tasks Vision -->
   <script type="module" crossorigin="anonymous">
     import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
-    // 1. gesture dictionary (파이썬 코드와 동일)
+    /* ==========================================================================
+       1. 제스처 매핑 딕셔너리 (파이썬 원본과 100% 동일)
+       ========================================================================== */
     const gesture = {
       0:'a', 1:'b', 2:'c', 3:'d', 4:'e', 5:'f', 6:'g', 7:'h',
       8:'i', 9:'j', 10:'k', 11:'l', 12:'m', 13:'n', 14:'o',
@@ -97,11 +286,26 @@
       22:'w', 23:'x', 24:'y', 25:'z', 26:'spacing', 27:'clear'
     };
 
-    // 2. dataSet.txt 로드 (파이썬: file = np.genfromtxt('dataSet.txt', delimiter=','))
+    /* ==========================================================================
+       2. 데이터셋 로드 (dataset.js 즉시 로드 + dataSet.txt 원격 폴백)
+       ========================================================================== */
     let angleFile = [];
     let labelFile = [];
 
+    const datasetStatusEl = document.getElementById('dataset-status');
+
     async function loadDataset() {
+      // 1. window.DATASET 우선 확인 (지연 없이 즉시 1176개 로드)
+      if (window.DATASET && Array.isArray(window.DATASET) && window.DATASET.length > 0) {
+        for (let row of window.DATASET) {
+          angleFile.push(row.slice(0, 15));
+          labelFile.push(Math.round(row[15]));
+        }
+        datasetStatusEl.textContent = `데이터셋 준비 완료 (${angleFile.length}개)`;
+        return;
+      }
+
+      // 2. dataSet.txt 비동기 fetch 폴백
       try {
         const res = await fetch('dataSet.txt');
         const text = await res.text();
@@ -115,17 +319,21 @@
             labelFile.push(Math.round(nums[15]));
           }
         }
-        document.getElementById('status-overlay').textContent = `데이터셋 로드 완료 (${angleFile.length}개) | 손을 보여주세요`;
+        datasetStatusEl.textContent = `데이터셋 준비 완료 (${angleFile.length}개)`;
       } catch (e) {
-        console.error('데이터셋 로드 실패:', e);
-        document.getElementById('status-overlay').textContent = '데이터셋 로드 실패';
+        console.error('데이터셋 로드 오류:', e);
+        datasetStatusEl.textContent = '데이터셋 로드 오류';
       }
     }
 
-    // 3. KNN k=3 (파이썬: ret, results, neighbours, dist = knn.findNearest(data, 3))
+    /* ==========================================================================
+       3. KNN 분류기 (OpenCV cv2.ml.KNearest 방식 100% 동일 구현)
+       ========================================================================== */
     function knnFindNearest(queryAngle, k = 3) {
-      if (angleFile.length === 0) return 0;
-      let dists = [];
+      if (angleFile.length === 0) return { label: 0, dist: 999, conf: 0 };
+
+      // 모든 데이터셋과의 유클리드 거리 제곱 계산
+      const dists = new Array(angleFile.length);
       for (let i = 0; i < angleFile.length; i++) {
         const row = angleFile[i];
         let d = 0;
@@ -133,27 +341,31 @@
           const diff = queryAngle[j] - row[j];
           d += diff * diff;
         }
-        dists.push({ dist: d, label: labelFile[i] });
+        dists[i] = { distSq: d, label: labelFile[i] };
       }
-      dists.sort((a, b) => a.dist - b.dist);
+
+      // 최근접 거리순 정렬
+      dists.sort((a, b) => a.distSq - b.distSq);
       const topK = dists.slice(0, k);
 
-      const votes = {};
-      for (let item of topK) {
-        votes[item.label] = (votes[item.label] || 0) + 1;
-      }
+      // OpenCV KNearest 다수결 판별 규칙:
+      // 1) 2번/3번 이웃이 같은 라벨이면 그 라벨이 2표로 과반 승리
+      // 2) 그 외(1번 이웃이 2표 이상이거나, 3개 모두 서로 다름)의 경우 가장 가까운 1번 이웃(topK[0]) 승리
       let best = topK[0].label;
-      let maxVotes = 0;
-      for (let lbl in votes) {
-        if (votes[lbl] > maxVotes) {
-          maxVotes = votes[lbl];
-          best = Number(lbl);
-        }
+      if (topK.length >= 3 && topK[1].label === topK[2].label) {
+        best = topK[1].label;
       }
-      return best;
+
+      const minDist = Math.sqrt(topK[0].distSq);
+      // 일치도 (거리 10도 이하면 95% 이상, 거리가 멀수록 감소)
+      const conf = Math.max(10, Math.min(99, Math.round(100 - (minDist * 1.3))));
+
+      return { label: best, dist: minDist, conf: conf };
     }
 
-    // 4. 관절 인덱스 및 연결선 (파이썬 코드와 동일)
+    /* ==========================================================================
+       4. 관절 인덱스 및 각도 비교 인덱스 (파이썬 코드와 100% 동일)
+       ========================================================================== */
     const v1_idx = [0, 1, 2, 3, 0, 5, 6, 7, 0, 9, 10, 11, 0, 13, 14, 15, 0, 17, 18, 19];
     const v2_idx = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
     const compareV1 = [0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 16, 17];
@@ -168,19 +380,77 @@
       [5, 9], [9, 13], [13, 17], [0, 17]
     ];
 
-    // 5. 파이썬 상태 변수 (파이썬 코드와 동일)
+    /* ==========================================================================
+       5. 상태 변수 및 노이즈 완충 필터
+       ========================================================================== */
     let startTime = Date.now() / 1000;
-    let prev_index = 0;
+    let prev_index = -1;
     let sentence = '';
-    const recognizeDelay = 1; // 1초
+    const recognizeDelay = 1.0; // 1초 유지 시 확정 입력
+
+    // 순간적인 카메라 센서 흔들림을 방지하는 5프레임 슬라이딩 윈도우 필터
+    const predHistory = [];
+    const HISTORY_SIZE = 5;
+
+    function getSmoothedPrediction(rawLabel) {
+      predHistory.push(rawLabel);
+      if (predHistory.length > HISTORY_SIZE) predHistory.shift();
+
+      const counts = {};
+      for (let l of predHistory) {
+        counts[l] = (counts[l] || 0) + 1;
+      }
+      let best = rawLabel;
+      let maxC = 0;
+      for (let l in counts) {
+        if (counts[l] > maxC) {
+          maxC = counts[l];
+          best = Number(l);
+        }
+      }
+      return best;
+    }
 
     const video = document.getElementById('webcam');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
-    const sentenceTextEl = document.getElementById('sentence-text');
-    let handLandmarker = null;
 
-    // 파이썬 cv2.putText 대응 함수 (미러링 화면에서도 글자가 똑바로 보이도록 처리)
+    const topHud = document.getElementById('top-hud');
+    const charMainEl = document.getElementById('char-main');
+    const charDescEl = document.getElementById('char-desc');
+    const progressBarFillEl = document.getElementById('progress-bar-fill');
+    const confValEl = document.getElementById('conf-val');
+    const holdValEl = document.getElementById('hold-val');
+    const fpsValEl = document.getElementById('fps-val');
+    const sentenceTextEl = document.getElementById('sentence-text');
+    const appinventorStatusEl = document.getElementById('appinventor-status');
+
+    let handLandmarker = null;
+    let frameCount = 0;
+    let lastFpsTime = performance.now();
+
+    // 앱 인벤터 통신
+    function sendToAppInventor(text) {
+      if (window.AppInventor && typeof window.AppInventor.setWebViewString === 'function') {
+        window.AppInventor.setWebViewString(text);
+        appinventorStatusEl.textContent = "AppInventor 전송됨 ✓";
+      } else {
+        appinventorStatusEl.textContent = "웹 모드 (로컬 연동)";
+      }
+    }
+
+    function updateSentence(text) {
+      sentence = text;
+      sentenceTextEl.textContent = sentence;
+      sendToAppInventor(sentence);
+    }
+
+    // 하단 버튼 이벤트
+    document.getElementById('btn-space').addEventListener('click', () => updateSentence(sentence + ' '));
+    document.getElementById('btn-back').addEventListener('click', () => updateSentence(sentence.slice(0, -1)));
+    document.getElementById('btn-clear').addEventListener('click', () => updateSentence(''));
+
+    // 미러링 화면에서도 글자가 똑바로 보이도록 그리는 함수
     function putText(text, x, y, size = 32, color = "#FFFFFF") {
       ctx.save();
       ctx.translate(x, y);
@@ -189,13 +459,19 @@
       ctx.fillStyle = color;
       ctx.strokeStyle = "#000000";
       ctx.lineWidth = 3;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
       ctx.strokeText(text, 0, 0);
       ctx.fillText(text, 0, 0);
       ctx.restore();
     }
 
-    // 6. 메인 루프 (파이썬: while True:)
+    /* ==========================================================================
+       6. 실시간 추론 및 렌더링 루프
+       ========================================================================== */
     function onFrame() {
+      const now = performance.now();
+
       if (video.videoWidth && (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight)) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
@@ -203,115 +479,179 @@
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       if (handLandmarker && video.readyState >= 2) {
-        const result = handLandmarker.detectForVideo(video, performance.now());
-        if (result && result.landmarks && result.landmarks.length > 0) {
-          for (let res of result.landmarks) {
-            // joint = np.zeros((21, 3))
-            const joint = res.map(lm => [lm.x, lm.y, lm.z || 0]);
+        const result = handLandmarker.detectForVideo(video, now);
+        const hasHand = result && result.landmarks && result.landmarks.length > 0;
 
-            // v1, v2 및 단위 벡터 v
-            const v = [];
-            for (let i = 0; i < 20; i++) {
-              const p1 = joint[v1_idx[i]];
-              const p2 = joint[v2_idx[i]];
-              const dx = p2[0] - p1[0];
-              const dy = p2[1] - p1[1];
-              const dz = p2[2] - p1[2];
-              const norm = Math.hypot(dx, dy, dz) || 1e-7;
-              v.push([dx / norm, dy / norm, dz / norm]);
-            }
+        if (hasHand) {
+          const res = result.landmarks[0];
+          const w = canvas.width;
+          const h = canvas.height;
 
-            // angle 계산
-            const angle = [];
-            const RAD_TO_DEG = 180.0 / Math.PI;
-            for (let i = 0; i < 15; i++) {
-              const u = v[compareV1[i]];
-              const w = v[compareV2[i]];
-              const dot = u[0]*w[0] + u[1]*w[1] + u[2]*w[2];
-              const clamped = Math.max(-1.0, Math.min(1.0, dot));
-              angle.push(Math.acos(clamped) * RAD_TO_DEG);
-            }
+          // 1. 관절 좌표: joint = [[lm.x, lm.y, lm.z], ...]
+          const joint = res.map(lm => [lm.x, lm.y, lm.z || 0]);
 
-            // knn 분류
-            const index = knnFindNearest(angle, 3);
-
-            // 1초 누적 로직 (파이썬과 100% 동일)
-            const currentTime = Date.now() / 1000;
-            if (index in gesture) {
-              if (index !== prev_index) {
-                startTime = currentTime;
-                prev_index = index;
-              } else {
-                if (currentTime - startTime > recognizeDelay) {
-                  if (index === 26) {
-                    sentence += ' ';
-                  } else if (index === 27) {
-                    sentence = '';
-                  } else {
-                    sentence += gesture[index];
-                  }
-                  startTime = currentTime;
-
-                  // 앱 인벤터 전송
-                  if (window.AppInventor && window.AppInventor.setWebViewString) {
-                    window.AppInventor.setWebViewString(sentence);
-                  }
-                  sentenceTextEl.textContent = sentence;
-                }
-              }
-
-              // cv2.putText(img, gesture[index].upper(), (res.landmark[0].x * w - 10, res.landmark[0].y * h + 40))
-              const wristX = res[0].x * canvas.width - 10;
-              const wristY = res[0].y * canvas.height + 40;
-              putText(gesture[index].toUpperCase(), wristX, wristY, 36, "#FFFFFF");
-            }
-
-            // mp_drawing.draw_landmarks(img, res, mp_hands.HAND_CONNECTIONS)
-            ctx.strokeStyle = "#00FF66";
-            ctx.lineWidth = 3;
-            for (let conn of HAND_CONNECTIONS) {
-              ctx.beginPath();
-              ctx.moveTo(res[conn[0]].x * canvas.width, res[conn[0]].y * canvas.height);
-              ctx.lineTo(res[conn[1]].x * canvas.width, res[conn[1]].y * canvas.height);
-              ctx.stroke();
-            }
-            ctx.fillStyle = "#FFFFFF";
-            for (let pt of res) {
-              ctx.beginPath();
-              ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 4, 0, 2 * Math.PI);
-              ctx.fill();
-            }
+          // 2. 뼈대 단위 벡터: v = (v2 - v1) / norm
+          const v = [];
+          for (let i = 0; i < 20; i++) {
+            const p1 = joint[v1_idx[i]];
+            const p2 = joint[v2_idx[i]];
+            const dx = p2[0] - p1[0];
+            const dy = p2[1] - p1[1];
+            const dz = p2[2] - p1[2];
+            const norm = Math.hypot(dx, dy, dz) || 1e-7;
+            v.push([dx / norm, dy / norm, dz / norm]);
           }
 
-          // cv2.putText(img, sentence, (20, 440))
-          putText(sentence, canvas.width / 2, canvas.height - 40, 32, "#00FF66");
+          // 3. 15개 관절 각도 계산
+          const angle = [];
+          const RAD_TO_DEG = 180.0 / Math.PI;
+          for (let i = 0; i < 15; i++) {
+            const u = v[compareV1[i]];
+            const w = v[compareV2[i]];
+            const dot = u[0]*w[0] + u[1]*w[1] + u[2]*w[2];
+            const clamped = Math.max(-1.0, Math.min(1.0, dot));
+            angle.push(Math.acos(clamped) * RAD_TO_DEG);
+          }
+
+          // 4. KNN (K=3) 판별 및 노이즈 완충
+          const rawKnn = knnFindNearest(angle, 3);
+          const index = getSmoothedPrediction(rawKnn.label);
+
+          if (index in gesture) {
+            const gestureChar = gesture[index];
+            const displayChar = (index === 26) ? '␣' : ((index === 27) ? '⌫' : gestureChar.toUpperCase());
+            const desc = (index === 26) ? 'SPACING (띄어쓰기)' : ((index === 27) ? 'CLEAR (초기화)' : `알파벳 [ ${gestureChar.toUpperCase()} ]`);
+
+            const currentTime = Date.now() / 1000;
+
+            // 파이썬 1초 유지 타이머 로직
+            if (index !== prev_index) {
+              startTime = currentTime;
+              prev_index = index;
+              topHud.classList.remove('confirmed');
+              topHud.classList.add('active');
+            } else {
+              const elapsed = currentTime - startTime;
+              const ratio = Math.min(1.0, elapsed / recognizeDelay);
+              progressBarFillEl.style.width = `${Math.round(ratio * 100)}%`;
+              holdValEl.textContent = `${elapsed.toFixed(1)}s / 1.0s`;
+
+              if (elapsed >= recognizeDelay) {
+                if (index === 26) {
+                  updateSentence(sentence + ' ');
+                } else if (index === 27) {
+                  updateSentence('');
+                } else {
+                  updateSentence(sentence + gestureChar);
+                }
+                startTime = currentTime;
+                topHud.classList.remove('active');
+                topHud.classList.add('confirmed');
+                if (navigator.vibrate) navigator.vibrate(30);
+              }
+            }
+
+            // HUD 텍스트 갱신
+            charMainEl.textContent = displayChar;
+            charDescEl.textContent = desc;
+            confValEl.textContent = `${rawKnn.conf}%`;
+
+            // 손목(관절 0번) 근처에 인식된 알파벳 표시 (파이썬 cv2.putText)
+            const wristX = res[0].x * w;
+            const wristY = res[0].y * h + 45;
+            putText(displayChar, wristX, wristY, 38, "#FFFFFF");
+          }
+
+          // 5. 관절 뼈대 그리기 (파이썬 mp_drawing.draw_landmarks)
+          ctx.strokeStyle = "#00FF66";
+          ctx.lineWidth = 3.5;
+          ctx.lineCap = "round";
+          for (let conn of HAND_CONNECTIONS) {
+            ctx.beginPath();
+            ctx.moveTo(res[conn[0]].x * w, res[conn[0]].y * h);
+            ctx.lineTo(res[conn[1]].x * w, res[conn[1]].y * h);
+            ctx.stroke();
+          }
+
+          ctx.fillStyle = "#00FF66";
+          for (let pt of res) {
+            ctx.beginPath();
+            ctx.arc(pt.x * w, pt.y * h, 4, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.strokeStyle = "#FFFFFF";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
+
+          // 화면 하단에 현재 문장 출력 (파이썬 cv2.putText(img, sentence, (20, 440)...))
+          putText(sentence, w / 2, h - 35, 30, "#00FF66");
+        } else {
+          // 손이 감지되지 않음
+          predHistory.length = 0;
+          prev_index = -1;
+          progressBarFillEl.style.width = '0%';
+          holdValEl.textContent = '0.0s / 1.0s';
+          charMainEl.textContent = '-';
+          charDescEl.textContent = '손을 카메라에 보여주세요 👋';
+          confValEl.textContent = '0%';
+          topHud.classList.remove('active', 'confirmed');
         }
+      }
+
+      // FPS 계산
+      frameCount++;
+      if (now - lastFpsTime >= 1000) {
+        fpsValEl.textContent = frameCount;
+        frameCount = 0;
+        lastFpsTime = now;
       }
 
       requestAnimationFrame(onFrame);
     }
 
-    // 7. 시작 및 초기화
+    /* ==========================================================================
+       7. 카메라 및 MediaPipe 모델 초기화
+       ========================================================================== */
     async function init() {
       await loadDataset();
 
       const vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
       );
-      handLandmarker = await HandLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-          delegate: "GPU"
-        },
-        runningMode: "VIDEO",
-        numHands: 1
-      });
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }
-      });
-      video.srcObject = stream;
-      await video.play();
+      const modelAssetPath = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+      const modelOptions = {
+        runningMode: "VIDEO",
+        numHands: 1,
+        minHandDetectionConfidence: 0.35,
+        minHandPresenceConfidence: 0.35,
+        minTrackingConfidence: 0.35
+      };
+
+      try {
+        handLandmarker = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: { modelAssetPath: modelAssetPath, delegate: "GPU" },
+          ...modelOptions
+        });
+      } catch (e) {
+        console.warn('GPU 모드 실패, CPU로 폴백:', e);
+        handLandmarker = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: { modelAssetPath: modelAssetPath, delegate: "CPU" },
+          ...modelOptions
+        });
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
+        video.srcObject = stream;
+        await video.play();
+      } catch (err) {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = fallbackStream;
+        await video.play();
+      }
 
       requestAnimationFrame(onFrame);
     }

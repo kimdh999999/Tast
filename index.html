@@ -191,7 +191,7 @@
     }
 
     class RollingBuffer {
-      constructor(length = 24, minFrames = 3) {
+      constructor(length = 12, minFrames = 4) {
         this.length = length;
         this.minFrames = minFrames;
         this.frames = [];
@@ -230,7 +230,7 @@
     }
 
     class LetterMerger {
-      constructor({ tau = 0.35, minFrames = 10, minHoldTime = 0.35, idleFramesToForget = 12 } = {}) {
+      constructor({ tau = 0.35, minFrames = 8, minHoldTime = 0.35, idleFramesToForget = 12 } = {}) {
         this.tau = tau;
         this.minFrames = minFrames;
         this.minHoldTime = minHoldTime;
@@ -264,7 +264,7 @@
       }
     }
 
-    const buffer = new RollingBuffer(24);
+    const buffer = new RollingBuffer(12, 4);
     const merger = new LetterMerger();
 
     function updateText() {
@@ -421,7 +421,11 @@
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            facingMode: "user"
+          },
           audio: false
         });
         video.srcObject = stream;
@@ -452,10 +456,10 @@
         let modelAssetPath = "models/hand_landmarker.task";
         const options = {
           runningMode: "VIDEO",
-          numHands: 2,
-          minHandDetectionConfidence: 0.35,
-          minHandPresenceConfidence: 0.35,
-          minTrackingConfidence: 0.35
+          numHands: 1, // 수화 알파벳(지화자) 1개 손 집중 감지로 성능 및 정확도 대폭 향상
+          minHandDetectionConfidence: 0.5,
+          minHandPresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5
         };
 
         try {
@@ -485,7 +489,11 @@
       }
     }
 
-    window.addEventListener("DOMContentLoaded", init);
+    if (document.readyState === "loading") {
+      window.addEventListener("DOMContentLoaded", init);
+    } else {
+      init();
+    }
   </script>
 </body>
 </html>

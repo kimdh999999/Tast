@@ -18,7 +18,7 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 12px;
+      padding: 10px;
       gap: 10px;
       min-height: 100vh;
     }
@@ -26,17 +26,22 @@
       position: relative;
       width: 100%;
       max-width: 480px;
-      aspect-ratio: 4 / 3;
       background: #000000;
       border: 1px solid #333333;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
     }
     #webcam {
       display: none;
     }
     #canvas {
       width: 100%;
-      height: 100%;
+      height: auto;
+      max-height: 55vh;
       display: block;
+      object-fit: contain;
     }
     #current-box {
       width: 100%;
@@ -44,24 +49,24 @@
       background: #1e1e1e;
       border: 1px solid #333333;
       padding: 10px 14px;
-      font-size: 16px;
+      font-size: 15px;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
     #current-letter {
       color: #ffffff;
-      font-size: 26px;
+      font-size: 24px;
       font-weight: bold;
     }
     #text-box {
       width: 100%;
       max-width: 480px;
-      min-height: 70px;
+      min-height: 60px;
       background: #1e1e1e;
       border: 1px solid #333333;
       padding: 12px;
-      font-size: 20px;
+      font-size: 18px;
       word-break: break-all;
       white-space: pre-wrap;
     }
@@ -73,7 +78,7 @@
     }
     .btn {
       flex: 1;
-      padding: 12px 0;
+      padding: 10px 0;
       font-size: 15px;
       font-weight: 600;
       background: #2a2a2a;
@@ -85,7 +90,7 @@
       background: #383838;
     }
     #supported-note {
-      font-size: 12px;
+      font-size: 11px;
       color: #777777;
       text-align: center;
     }
@@ -94,12 +99,12 @@
 <body>
   <div id="stage-container">
     <video id="webcam" playsinline autoplay muted></video>
-    <canvas id="canvas" width="640" height="480"></canvas>
+    <canvas id="canvas"></canvas>
   </div>
 
   <div id="current-box">
     <span>현재 인식</span>
-    <span id="current-letter">-</span>
+    <span id="current-letter">준비 중...</span>
   </div>
 
   <div id="text-box"></div>
@@ -195,7 +200,7 @@
     }
 
     class RollingBuffer {
-      constructor(length = 30) {
+      constructor(length = 24) {
         this.length = length;
         this.frames = [];
         this.mask = null;
@@ -228,7 +233,7 @@
     }
 
     class LetterMerger {
-      constructor({ tau = 0.35, minFrames = 12, minHoldTime = 0.4, idleFramesToForget = 15 } = {}) {
+      constructor({ tau = 0.35, minFrames = 10, minHoldTime = 0.35, idleFramesToForget = 12 } = {}) {
         this.tau = tau;
         this.minFrames = minFrames;
         this.minHoldTime = minHoldTime;
@@ -262,7 +267,7 @@
       }
     }
 
-    const buffer = new RollingBuffer(30);
+    const buffer = new RollingBuffer(24);
     const merger = new LetterMerger();
 
     function updateText() {
@@ -276,21 +281,21 @@
     btnDelete.addEventListener("click", () => { text = text.slice(0, -1); updateText(); });
     btnClear.addEventListener("click", () => { text = ""; updateText(); });
 
-    function drawSkeleton(landmarks) {
-      ctx.lineWidth = 2;
+    function drawSkeleton(landmarks, w, h) {
+      ctx.lineWidth = 2.5;
       ctx.strokeStyle = "#888888";
       ctx.fillStyle = "#ffffff";
       for (const pts of landmarks) {
         ctx.beginPath();
         for (const [a, b] of HAND_CONNECTIONS) {
           if (!pts[a] || !pts[b]) continue;
-          ctx.moveTo(pts[a].x * 640, pts[a].y * 480);
-          ctx.lineTo(pts[b].x * 640, pts[b].y * 480);
+          ctx.moveTo(pts[a].x * w, pts[a].y * h);
+          ctx.lineTo(pts[b].x * w, pts[b].y * h);
         }
         ctx.stroke();
         for (const p of pts) {
           ctx.beginPath();
-          ctx.arc(p.x * 640, p.y * 480, 3, 0, Math.PI * 2);
+          ctx.arc(p.x * w, p.y * h, 3.5, 0, Math.PI * 2);
           ctx.fill();
         }
       }
@@ -328,25 +333,39 @@
     }
 
     async function loop(now) {
+      if (video.videoWidth && (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight)) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      }
+
+      const w = canvas.width;
+      const h = canvas.height;
+
       ctx.save();
-      ctx.translate(640, 0);
+      ctx.translate(w, 0);
       ctx.scale(-1, 1);
-      ctx.drawImage(video, 0, 0, 640, 480);
+      ctx.drawImage(video, 0, 0, w, h);
       ctx.restore();
 
       let ts = Math.round(now);
       if (ts <= lastTimestamp) ts = lastTimestamp + 1;
       lastTimestamp = ts;
 
-      const result = landmarker.detectForVideo(canvas, ts);
+      let result = null;
+      if (landmarker) {
+        try {
+          result = landmarker.detectForVideo(canvas, ts);
+        } catch (e) {}
+      }
+
       if (result?.landmarks?.length) {
-        drawSkeleton(result.landmarks);
+        drawSkeleton(result.landmarks, w, h);
       }
 
       const vector = toRawVector(result);
       buffer.push(vector);
 
-      if (!isBusy) {
+      if (!isBusy && session) {
         isBusy = true;
         try {
           const aggregated = buffer.value();
@@ -367,13 +386,21 @@
             confidence = probs[best];
           }
 
-          currentLetterEl.textContent = predictedLabel || "-";
+          if (predictedLabel) {
+            currentLetterEl.textContent = predictedLabel;
+          } else if (result?.landmarks?.length) {
+            currentLetterEl.textContent = "동작 분석 중...";
+          } else {
+            currentLetterEl.textContent = "-";
+          }
 
           const committed = merger.update(predictedLabel, confidence, now / 1000);
           if (committed) {
             text += committed;
             updateText();
           }
+        } catch (err) {
+          console.error("추론 오류:", err);
         } finally {
           isBusy = false;
         }
@@ -383,56 +410,72 @@
     }
 
     async function init() {
-      ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
-      ort.env.wasm.numThreads = 1;
-
-      const [labelsData, sess, fileset] = await Promise.all([
-        fetch("models/labels.json").then((r) => r.json()),
-        ort.InferenceSession.create("models/asl_svm.onnx", { executionProviders: ["wasm"] }),
-        FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm")
-      ]);
-
-      labels = labelsData;
-      session = sess;
-
-      const modelAssetPath = "models/hand_landmarker.task";
-      try {
-        landmarker = await HandLandmarker.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath, delegate: "GPU" },
-          runningMode: "VIDEO",
-          numHands: 2,
-          minHandDetectionConfidence: 0.7,
-          minHandPresenceConfidence: 0.7,
-          minTrackingConfidence: 0.7
-        });
-      } catch (gpuErr) {
-        landmarker = await HandLandmarker.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath, delegate: "CPU" },
-          runningMode: "VIDEO",
-          numHands: 2,
-          minHandDetectionConfidence: 0.7,
-          minHandPresenceConfidence: 0.7,
-          minTrackingConfidence: 0.7
-        });
-      }
+      currentLetterEl.textContent = "AI 로딩 중...";
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-          audio: false
-        });
-        video.srcObject = stream;
-        await video.play();
-      } catch (camErr) {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "user" },
           audio: false
         });
         video.srcObject = stream;
         await video.play();
+
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+      } catch (camErr) {
+        currentLetterEl.textContent = "카메라 오류";
+        return;
       }
 
       requestAnimationFrame(loop);
+
+      try {
+        ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
+        ort.env.wasm.numThreads = 1;
+
+        const [labelsData, sess, fileset] = await Promise.all([
+          fetch("models/labels.json").then((r) => r.json()),
+          ort.InferenceSession.create("models/asl_svm.onnx", { executionProviders: ["wasm"] }),
+          FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm")
+        ]);
+
+        labels = labelsData;
+        session = sess;
+
+        let modelAssetPath = "models/hand_landmarker.task";
+        const options = {
+          runningMode: "VIDEO",
+          numHands: 2,
+          minHandDetectionConfidence: 0.5,
+          minHandPresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5
+        };
+
+        try {
+          landmarker = await HandLandmarker.createFromOptions(fileset, {
+            baseOptions: { modelAssetPath, delegate: "GPU" },
+            ...options
+          });
+        } catch (gpuErr) {
+          try {
+            landmarker = await HandLandmarker.createFromOptions(fileset, {
+              baseOptions: { modelAssetPath, delegate: "CPU" },
+              ...options
+            });
+          } catch (cpuErr) {
+            modelAssetPath = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+            landmarker = await HandLandmarker.createFromOptions(fileset, {
+              baseOptions: { modelAssetPath, delegate: "CPU" },
+              ...options
+            });
+          }
+        }
+
+        currentLetterEl.textContent = "-";
+      } catch (loadErr) {
+        console.error("모델 로딩 실패:", loadErr);
+        currentLetterEl.textContent = "모델 로딩 실패";
+      }
     }
 
     window.addEventListener("DOMContentLoaded", init);

@@ -89,11 +89,6 @@
     .btn:active {
       background: #383838;
     }
-    #supported-note {
-      font-size: 11px;
-      color: #777777;
-      text-align: center;
-    }
   </style>
 </head>
 <body>
@@ -113,10 +108,6 @@
     <button id="btn-space" class="btn">Space</button>
     <button id="btn-delete" class="btn">Delete</button>
     <button id="btn-clear" class="btn">Clear</button>
-  </div>
-
-  <div id="supported-note">
-    지원 알파벳: A ~ Y (J, Z는 모션 제스처로 모델 미지원)
   </div>
 
   <script type="module">
@@ -289,8 +280,8 @@
 
     function drawSkeleton(landmarks, w, h) {
       ctx.lineWidth = 2.5;
-      ctx.strokeStyle = "#888888";
-      ctx.fillStyle = "#ffffff";
+      ctx.strokeStyle = "#00FF00";
+      ctx.fillStyle = "#FF0000";
       for (const pts of landmarks) {
         ctx.beginPath();
         for (const [a, b] of HAND_CONNECTIONS) {

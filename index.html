@@ -200,8 +200,9 @@
     }
 
     class RollingBuffer {
-      constructor(length = 24) {
+      constructor(length = 24, minFrames = 3) {
         this.length = length;
+        this.minFrames = minFrames;
         this.frames = [];
         this.mask = null;
       }
@@ -215,7 +216,12 @@
         this.frames.push(vector);
         if (this.frames.length > this.length) this.frames.shift();
       }
-      get ready() { return this.frames.length === this.length; }
+      clear() {
+        this.frames.length = 0;
+        this.mask = null;
+      }
+      get ready() { return this.frames.length >= this.minFrames; }
+      get fill() { return this.frames.length / this.length; }
       value() {
         if (!this.ready) return null;
         const n = this.frames.length;
@@ -332,6 +338,8 @@
       return vector;
     }
 
+    let noHandFrames = 0;
+
     async function loop(now) {
       if (video.videoWidth && (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight)) {
         canvas.width = video.videoWidth;
@@ -363,7 +371,15 @@
       }
 
       const vector = toRawVector(result);
-      buffer.push(vector);
+      if (vector) {
+        noHandFrames = 0;
+        buffer.push(vector);
+      } else {
+        noHandFrames++;
+        if (noHandFrames >= 5) {
+          buffer.clear();
+        }
+      }
 
       if (!isBusy && session) {
         isBusy = true;
@@ -446,9 +462,9 @@
         const options = {
           runningMode: "VIDEO",
           numHands: 2,
-          minHandDetectionConfidence: 0.5,
-          minHandPresenceConfidence: 0.5,
-          minTrackingConfidence: 0.5
+          minHandDetectionConfidence: 0.35,
+          minHandPresenceConfidence: 0.35,
+          minTrackingConfidence: 0.35
         };
 
         try {

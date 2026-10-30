@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>MediaPipe 수화 인식 </title>
+  <title>ASL Alphabet Recognition</title>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
   <style>
     * {
       box-sizing: border-box;
@@ -11,607 +12,430 @@
       padding: 0;
     }
     body {
-      background: #000;
-      overflow: hidden;
-      width: 100vw;
-      height: 100vh;
+      background: #121212;
+      color: #ffffff;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 12px;
+      gap: 10px;
+      min-height: 100vh;
     }
-    #video {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      object-fit: cover;
-      transform: scaleX(-1);
-      z-index: 1;
+    #stage-container {
+      position: relative;
+      width: 100%;
+      max-width: 480px;
+      aspect-ratio: 4 / 3;
+      background: #000000;
+      border: 1px solid #333333;
+    }
+    #webcam {
+      display: none;
     }
     #canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      object-fit: cover;
-      transform: scaleX(-1);
-      z-index: 2;
-      pointer-events: none;
+      width: 100%;
+      height: 100%;
+      display: block;
     }
-    /* 하단 단순 UI 바 */
-    #bottom-bar {
-      position: absolute;
-      bottom: 24px;
-      left: 50%;
-      transform: translateX(-50%);
+    #current-box {
+      width: 100%;
+      max-width: 480px;
+      background: #1e1e1e;
+      border: 1px solid #333333;
+      padding: 10px 14px;
+      font-size: 16px;
       display: flex;
+      justify-content: space-between;
       align-items: center;
-      gap: 10px;
-      background: rgba(0, 0, 0, 0.8);
-      border: 1px solid #444;
-      border-radius: 8px;
-      padding: 8px 16px;
-      z-index: 10;
     }
-    #recognized-text {
-      color: #00FF66;
-      font-size: 28px;
+    #current-letter {
+      color: #ffffff;
+      font-size: 26px;
       font-weight: bold;
-      min-width: 150px;
-      letter-spacing: 2px;
+    }
+    #text-box {
+      width: 100%;
+      max-width: 480px;
+      min-height: 70px;
+      background: #1e1e1e;
+      border: 1px solid #333333;
+      padding: 12px;
+      font-size: 20px;
       word-break: break-all;
+      white-space: pre-wrap;
+    }
+    #button-bar {
+      width: 100%;
+      max-width: 480px;
+      display: flex;
+      gap: 8px;
     }
     .btn {
+      flex: 1;
+      padding: 12px 0;
       font-size: 15px;
-      font-weight: bold;
-      border: none;
-      border-radius: 6px;
-      padding: 8px 14px;
-      cursor: pointer;
-    }
-    #clear-btn {
-      background: #e53e3e;
-      color: #fff;
-    }
-    #clear-btn:active {
-      background: #c53030;
-    }
-    #train-toggle-btn {
-      background: #3182ce;
-      color: #fff;
-    }
-    #train-toggle-btn:active {
-      background: #2b6cb0;
-    }
-
-    /* 옵션 2: 원클릭 데이터 수집 패널 (토글형) */
-    #train-panel {
-      display: none;
-      position: absolute;
-      bottom: 80px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(15, 23, 42, 0.95);
-      border: 1px solid #38bdf8;
-      border-radius: 10px;
-      padding: 12px 18px;
-      z-index: 20;
-      gap: 10px;
-      align-items: center;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
-    }
-    #train-panel.show {
-      display: flex;
-    }
-    select, .panel-btn {
-      padding: 6px 10px;
-      font-size: 14px;
-      font-weight: bold;
-      border-radius: 6px;
-      border: 1px solid #64748b;
-      background: #1e293b;
-      color: #fff;
-    }
-    #train-capture-btn {
-      background: #10b981;
-      border-color: #10b981;
-      color: #fff;
-      cursor: pointer;
-    }
-    #train-capture-btn:active {
-      background: #059669;
-    }
-    #train-status {
-      font-size: 13px;
-      color: #38bdf8;
       font-weight: 600;
+      background: #2a2a2a;
+      color: #ffffff;
+      border: 1px solid #444444;
+      cursor: pointer;
+    }
+    .btn:active {
+      background: #383838;
+    }
+    #supported-note {
+      font-size: 12px;
+      color: #777777;
+      text-align: center;
     }
   </style>
 </head>
 <body>
-
-  <video id="video" playsinline autoplay muted></video>
-  <canvas id="canvas"></canvas>
-
-  <!-- 하단 바: 인식 문장 + Clear 버튼 + 학습 패널 토글 버튼 -->
-  <div id="bottom-bar">
-    <span id="recognized-text"></span>
-    <button id="clear-btn" class="btn">Clear</button>
-    <button id="train-toggle-btn" class="btn">+ add</button>
+  <div id="stage-container">
+    <video id="webcam" playsinline autoplay muted></video>
+    <canvas id="canvas" width="640" height="480"></canvas>
   </div>
 
-  <!-- 옵션 2: 1초 만에 특정 알파벳 손모양 학습하는 패널 -->
-  <div id="train-panel">
-    <select id="train-char-select">
-      <option value="A">A</option><option value="B" selected>B</option><option value="C">C</option>
-      <option value="D">D</option><option value="E">E</option><option value="F">F</option>
-      <option value="G">G</option><option value="H">H</option><option value="I">I</option>
-      <option value="J">J</option><option value="K">K</option><option value="L">L</option>
-      <option value="M">M</option><option value="N">N</option><option value="O">O</option>
-      <option value="P">P</option><option value="Q">Q</option><option value="R">R</option>
-      <option value="S">S</option><option value="T">T</option><option value="U">U</option>
-      <option value="V">V</option><option value="W">W</option><option value="X">X</option>
-      <option value="Y">Y</option><option value="Z">Z</option>
-    </select>
-    <button id="train-capture-btn" class="btn"> 손모양 20장 학습</button>
-    <button id="train-reset-btn" class="panel-btn">초기화</button>
-    <span id="train-status">학습 데이터: 0개</span>
+  <div id="current-box">
+    <span>현재 인식</span>
+    <span id="current-letter">-</span>
   </div>
 
-  <script type="module" crossorigin="anonymous">
-    import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+  <div id="text-box"></div>
 
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    const recognizedTextEl = document.getElementById('recognized-text');
-    const clearBtn = document.getElementById('clear-btn');
-    const trainToggleBtn = document.getElementById('train-toggle-btn');
-    const trainPanel = document.getElementById('train-panel');
-    const trainCharSelect = document.getElementById('train-char-select');
-    const trainCaptureBtn = document.getElementById('train-capture-btn');
-    const trainResetBtn = document.getElementById('train-reset-btn');
-    const trainStatusEl = document.getElementById('train-status');
+  <div id="button-bar">
+    <button id="btn-space" class="btn">Space</button>
+    <button id="btn-delete" class="btn">Delete</button>
+    <button id="btn-clear" class="btn">Clear</button>
+  </div>
 
-    let handLandmarker = null;
-    let sentence = '';
-    let currentLetter = '';
-    let lastInputTime = 0;
-    const COOLDOWN_MS = 1000; // 1글자 입력 후 1초 대기
+  <div id="supported-note">
+    지원 알파벳: A ~ Y (J, Z는 모션 제스처로 모델 미지원)
+  </div>
 
-    let stableChar = null;
-    let stableCount = 0;
-    const STABLE_REQUIRED = 7; // 약 220ms 유지 시 안정적 판정
+  <script type="module">
+    import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/vision_bundle.mjs";
 
-    // 옵션 2: 맞춤 학습 데이터셋 (로컬 스토리지에 자동 보관)
-    let customSamples = [];
-    try {
-      const saved = localStorage.getItem('asl_custom_samples');
-      if (saved) customSamples = JSON.parse(saved);
-    } catch(e) {}
+    const video = document.getElementById("webcam");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const currentLetterEl = document.getElementById("current-letter");
+    const textBoxEl = document.getElementById("text-box");
+    const btnSpace = document.getElementById("btn-space");
+    const btnDelete = document.getElementById("btn-delete");
+    const btnClear = document.getElementById("btn-clear");
 
-    function updateTrainStatus() {
-      const counts = {};
-      for (let s of customSamples) counts[s.label] = (counts[s.label] || 0) + 1;
-      const keys = Object.keys(counts);
-      trainStatusEl.textContent = `학습 완료: ${keys.length}개 알파벳 (${customSamples.length}장)`;
-    }
-    updateTrainStatus();
+    let text = "";
+    let session = null;
+    let labels = [];
+    let landmarker = null;
+    let isBusy = false;
+    let lastTimestamp = -1;
 
-    let capturingLabel = null;
-    let captureRemaining = 0;
-
-    trainToggleBtn.addEventListener('click', () => {
-      trainPanel.classList.toggle('show');
-    });
-
-    trainCaptureBtn.addEventListener('click', () => {
-      capturingLabel = trainCharSelect.value;
-      captureRemaining = 20;
-      trainStatusEl.textContent = `[${capturingLabel}] 손모양 20장 캡처`;
-    });
-
-    trainResetBtn.addEventListener('click', () => {
-      if (confirm('데이터를 삭제할까요?')) {
-        customSamples = [];
-        localStorage.removeItem('asl_custom_samples');
-        updateTrainStatus();
-      }
-    });
-
-    // 21개 관절 연결선
     const HAND_CONNECTIONS = [
-      [0, 1], [1, 2], [2, 3], [3, 4],          // 엄지
-      [0, 5], [5, 6], [6, 7], [7, 8],          // 검지
-      [0, 9], [9, 10], [10, 11], [11, 12],     // 중지
-      [0, 13], [13, 14], [14, 15], [15, 16],   // 약지
-      [0, 17], [17, 18], [18, 19], [19, 20],   // 소지
-      [5, 9], [9, 13], [13, 17], [0, 17]       // 손바닥
+      [0, 1], [1, 2], [2, 3], [3, 4],
+      [0, 5], [5, 6], [6, 7], [7, 8],
+      [5, 9], [9, 10], [10, 11], [11, 12],
+      [9, 13], [13, 14], [14, 15], [15, 16],
+      [13, 17], [17, 18], [18, 19], [19, 20],
+      [0, 17]
     ];
 
-    /* ==========================================================================
-       [옵션 1 핵심] 손 자체 기준 로컬 3D 좌표계 정규화 (회전/기울기/크기 불변)
-       ========================================================================== */
-    function normalizeHand(landmarks) {
-      // 1. 손목(0번)을 원점(0,0,0)으로 이동
-      const w = landmarks[0];
-      const translated = landmarks.map(p => ({
-        x: p.x - w.x,
-        y: p.y - w.y,
-        z: (p.z || 0) - (w.z || 0)
-      }));
-
-      // 2. 손목에서 중지뿌리(9번)까지 거리를 1.0으로 스케일 정규화
-      const m9 = translated[9];
-      const scale = Math.hypot(m9.x, m9.y, m9.z) || 1e-6;
-      const scaled = translated.map(p => ({
-        x: p.x / scale,
-        y: p.y / scale,
-        z: p.z / scale
-      }));
-
-      // 3. Y축 기준 벡터 (손목 -> 중지뿌리 9번)
-      const uy = { x: scaled[9].x, y: scaled[9].y, z: scaled[9].z };
-
-      // 손바닥 횡단 벡터 (검지뿌리 5번 -> 소지뿌리 17번)
-      const v_palm = {
-        x: scaled[17].x - scaled[5].x,
-        y: scaled[17].y - scaled[5].y,
-        z: scaled[17].z - scaled[5].z
-      };
-
-      // Z축 = uy x v_palm (손바닥 평면 수직 법선 벡터)
-      let uz = {
-        x: uy.y * v_palm.z - uy.z * v_palm.y,
-        y: uy.z * v_palm.x - uy.x * v_palm.z,
-        z: uy.x * v_palm.y - uy.y * v_palm.x
-      };
-      const len_z = Math.hypot(uz.x, uz.y, uz.z) || 1e-6;
-      uz = { x: uz.x / len_z, y: uz.y / len_z, z: uz.z / len_z };
-
-      // X축 = uy x uz (손바닥 횡축)
-      let ux = {
-        x: uy.y * uz.z - uy.z * uz.y,
-        y: uy.z * uz.x - uy.x * uz.z,
-        z: uy.x * uz.y - uy.y * uz.x
-      };
-      const len_x = Math.hypot(ux.x, ux.y, ux.z) || 1e-6;
-      ux = { x: ux.x / len_x, y: ux.y / len_x, z: ux.z / len_x };
-
-      // 모든 21개 관절을 (ux, uy, uz) 로컬 기저로 투영
-      return scaled.map(p => ({
-        x: p.x * ux.x + p.y * ux.y + p.z * ux.z,
-        y: p.x * uy.x + p.y * uy.y + p.z * uy.z,
-        z: p.x * uz.x + p.y * uz.y + p.z * uz.z
-      }));
+    function toWristRelative(vector) {
+      const out = Float32Array.from(vector);
+      for (let hand = 0; hand < 2; hand++) {
+        const start = hand * 63;
+        let present = false;
+        for (let i = start; i < start + 63; i++) {
+          if (out[i] !== 0) { present = true; break; }
+        }
+        if (!present) continue;
+        const wx = out[start], wy = out[start + 1], wz = out[start + 2];
+        for (let k = 0; k < 21; k++) {
+          const i = start + k * 3;
+          out[i] -= wx;
+          out[i + 1] -= wy;
+          out[i + 2] -= wz;
+        }
+      }
+      return out;
     }
 
-    // 두 정규화 관절 간의 3D 유클리드 거리
-    function ndist(p1, p2) {
-      return Math.hypot(p1.x - p2.x, p1.y - p2.y, p1.z - p2.z);
+    function toScaleNormalised(vector) {
+      const out = Float32Array.from(vector);
+      for (let hand = 0; hand < 2; hand++) {
+        const start = hand * 63;
+        let present = false;
+        for (let i = start; i < start + 63; i++) {
+          if (out[i] !== 0) { present = true; break; }
+        }
+        if (!present) continue;
+        let size = 0;
+        for (let k = 0; k < 21; k++) {
+          const i = start + k * 3;
+          const d = Math.hypot(out[i], out[i + 1], out[i + 2]);
+          if (d > size) size = d;
+        }
+        const divisor = Math.max(size, 1e-8);
+        for (let i = start; i < start + 63; i++) out[i] /= divisor;
+      }
+      return out;
     }
 
-    /* ==========================================================================
-       [옵션 1] 정규화 좌표 기반 3D 알파벳 판별 엔진
-       ========================================================================== */
-    function classifyNormalizedASL(norm) {
-      // 손가락 펴짐 판정 (Y 높이가 1.35 이상이면 곧게 펴짐, 1.15 이하면 굽힘)
-      const iExt = norm[8].y > 1.35;
-      const mExt = norm[12].y > 1.35;
-      const rExt = norm[16].y > 1.30;
-      const pExt = norm[20].y > 1.25;
-      const tExt = Math.hypot(norm[4].x, norm[4].y) > 0.85 || norm[4].x < -0.45;
-
-      const dThumbIndex = ndist(norm[4], norm[8]);
-      const dThumbMiddle = ndist(norm[4], norm[12]);
-      const dIndexMiddle = ndist(norm[8], norm[12]);
-
-      // 1. Y (Shaka): 엄지 + 새끼손가락만 바깥으로 뻗음
-      if (tExt && pExt && !iExt && !mExt && !rExt) {
-        return 'Y';
-      }
-
-      // 2. L: 엄지와 검지가 90도 직각 형성
-      if (tExt && iExt && !mExt && !rExt && !pExt) {
-        if (dThumbIndex > 0.65) return 'L';
-      }
-
-      // 3. W: 3개 손가락 (검지, 중지, 약지) 펴짐
-      if (iExt && mExt && rExt && !pExt) {
-        return 'W';
-      }
-
-      // 4. B: 4개 손가락 모두 펴짐
-      if (iExt && mExt && rExt && pExt) {
-        return 'B';
-      }
-
-      // 5. F (OK 모양): 검지와 엄지가 맞닿고 중지/약지/소지 펴짐
-      if (!iExt && mExt && rExt && pExt && dThumbIndex < 0.35) {
-        return 'F';
-      }
-
-      // 6. I: 새끼손가락만 곧게 펴짐
-      if (!iExt && !mExt && !rExt && pExt && !tExt) {
-        return 'I';
-      }
-
-      // 7. D & X: 검지만 펴진 형태
-      if (iExt && !mExt && !rExt && !pExt) {
-        // 검지 끝이 갈고리처럼 굽혀져 있으면 X
-        if (norm[8].y < norm[6].y + 0.1) return 'X';
-        // 검지가 곧게 솟아있으면 D
-        return 'D';
-      }
-
-      // 8. V, U, R, K: 검지와 중지 2개 펴짐
-      if (iExt && mExt && !rExt && !pExt) {
-        // K: 엄지가 두 손가락 사이에서 위로 솟아있음
-        if (tExt && norm[4].y > 0.6 && norm[4].y < norm[8].y) {
-          return 'K';
-        }
-        // R: 검지와 중지 교차 (크로스)
-        if (norm[8].x > norm[12].x + 0.05) {
-          return 'R';
-        }
-        // V vs U: 손가락 벌림 간격
-        if (dIndexMiddle > 0.35) {
-          return 'V';
-        } else {
-          return 'U';
-        }
-      }
-
-      // 9. C & O: 둥근 모양
-      const isCurved = norm[8].y > 0.8 && norm[8].y < 1.35 && !iExt;
-      if (isCurved && norm[12].y > 0.8 && norm[12].y < 1.35) {
-        if (dThumbIndex < 0.30) {
-          return 'O';
-        } else if (dThumbIndex >= 0.30 && dThumbIndex < 0.80) {
-          return 'C';
-        }
-      }
-
-      // 10. 주먹 계열 (4손가락 접힘): A, S, E, T, M, N
-      if (!iExt && !mExt && !rExt && !pExt) {
-        // A: 엄지가 검지 옆에 붙어 위를 향함
-        if (norm[4].y > 0.80 && norm[4].x < -0.15) {
-          return 'A';
-        }
-        // E: 엄지가 손톱 아래로 단단히 접혀 들어감
-        if (norm[4].y < norm[8].y && norm[4].y < norm[12].y) {
-          return 'E';
-        }
-        // T: 엄지가 검지와 중지 사이로 삐져나옴
-        if (norm[4].x >= -0.20 && norm[4].x <= 0.05 && norm[4].y > 0.55 && norm[4].y < 0.90) {
-          return 'T';
-        }
-        // S: 엄지가 주먹 앞을 가로질러 덮음
-        if (norm[4].z > 0.12) {
-          return 'S';
-        }
-        return 'A';
-      }
-
-      return null;
+    function transform(vector) {
+      return toScaleNormalised(toWristRelative(vector));
     }
 
-    /* ==========================================================================
-       [옵션 2] 맞춤 학습 KNN 분류 (사용자 데이터 우선 매칭)
-       ========================================================================== */
-    function classifyWithCustomKNN(norm) {
-      if (customSamples.length === 0) return null;
-
-      // 63차원 벡터 생성
-      const vec = [];
-      for (let p of norm) vec.push(p.x, p.y, p.z);
-
-      let bestDist = Infinity;
-      let bestLabel = null;
-
-      for (let s of customSamples) {
-        let sumSq = 0;
-        for (let i = 0; i < 63; i++) {
-          const diff = vec[i] - s.vec[i];
-          sumSq += diff * diff;
-        }
-        if (sumSq < bestDist) {
-          bestDist = sumSq;
-          bestLabel = s.label;
-        }
-      }
-
-      // 거리 제곱이 0.8 이내면 높은 확신으로 사용자 맞춤 모델 우선 채택
-      if (bestDist < 0.8) {
-        return bestLabel;
-      }
-      return null;
+    function handMask(v) {
+      let left = false, right = false;
+      for (let i = 0; i < 63; i++) { if (v[i] !== 0) { left = true; break; } }
+      for (let i = 63; i < 126; i++) { if (v[i] !== 0) { right = true; break; } }
+      return (left ? 1 : 0) | (right ? 2 : 0);
     }
 
-    // 손목 위치에 현재 인식 중인 글자 출력
-    function drawWristText(text, x, y) {
-      if (!text) return;
+    class RollingBuffer {
+      constructor(length = 30) {
+        this.length = length;
+        this.frames = [];
+        this.mask = null;
+      }
+      push(vector) {
+        if (!vector) return;
+        const m = handMask(vector);
+        if (m !== this.mask) {
+          this.frames.length = 0;
+          this.mask = m;
+        }
+        this.frames.push(vector);
+        if (this.frames.length > this.length) this.frames.shift();
+      }
+      get ready() { return this.frames.length === this.length; }
+      value() {
+        if (!this.ready) return null;
+        const n = this.frames.length;
+        const out = new Float32Array(126);
+        const col = new Array(n);
+        const mid = n >> 1;
+        const even = (n % 2 === 0);
+        for (let d = 0; d < 126; d++) {
+          for (let f = 0; f < n; f++) col[f] = this.frames[f][d];
+          col.sort((a, b) => a - b);
+          out[d] = even ? (col[mid - 1] + col[mid]) / 2 : col[mid];
+        }
+        return out;
+      }
+    }
+
+    class LetterMerger {
+      constructor({ tau = 0.35, minFrames = 12, minHoldTime = 0.4, idleFramesToForget = 15 } = {}) {
+        this.tau = tau;
+        this.minFrames = minFrames;
+        this.minHoldTime = minHoldTime;
+        this.idleFramesToForget = idleFramesToForget;
+        this.idleFrames = 0;
+        this.candidate = null;
+        this.lastCommitted = null;
+      }
+      update(label, confidence, now = performance.now() / 1000) {
+        if (!label || confidence < this.tau) {
+          this.idleFrames++;
+          this.candidate = null;
+          if (this.idleFrames >= this.idleFramesToForget) this.lastCommitted = null;
+          return null;
+        }
+        this.idleFrames = 0;
+        if (!this.candidate || this.candidate.label !== label) {
+          this.candidate = { label, frames: 0, sum: 0, startedAt: now, committed: false };
+        }
+        const c = this.candidate;
+        c.frames++;
+        c.sum += confidence;
+        if (c.committed) return null;
+        if (!(c.frames >= this.minFrames && (now - c.startedAt) >= this.minHoldTime && (c.sum / c.frames) >= this.tau)) {
+          return null;
+        }
+        c.committed = true;
+        if (label === this.lastCommitted) return null;
+        this.lastCommitted = label;
+        return label;
+      }
+    }
+
+    const buffer = new RollingBuffer(30);
+    const merger = new LetterMerger();
+
+    function updateText() {
+      textBoxEl.textContent = text;
+      if (window.AppInventor && typeof window.AppInventor.setWebViewString === "function") {
+        window.AppInventor.setWebViewString(text);
+      }
+    }
+
+    btnSpace.addEventListener("click", () => { text += " "; updateText(); });
+    btnDelete.addEventListener("click", () => { text = text.slice(0, -1); updateText(); });
+    btnClear.addEventListener("click", () => { text = ""; updateText(); });
+
+    function drawSkeleton(landmarks) {
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#888888";
+      ctx.fillStyle = "#ffffff";
+      for (const pts of landmarks) {
+        ctx.beginPath();
+        for (const [a, b] of HAND_CONNECTIONS) {
+          if (!pts[a] || !pts[b]) continue;
+          ctx.moveTo(pts[a].x * 640, pts[a].y * 480);
+          ctx.lineTo(pts[b].x * 640, pts[b].y * 480);
+        }
+        ctx.stroke();
+        for (const p of pts) {
+          ctx.beginPath();
+          ctx.arc(p.x * 640, p.y * 480, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    function toRawVector(result) {
+      if (!result?.landmarks?.length) return null;
+      const vector = new Float32Array(126);
+      const filled = [false, false];
+      const handedness = result.handedness ?? [];
+
+      for (let i = 0; i < result.landmarks.length; i++) {
+        const raw = handedness[i]?.[0]?.categoryName ?? "Left";
+        const userHand = (raw === "Left") ? "Right" : "Left";
+        let slot = (userHand === "Left") ? 0 : 1;
+
+        if (filled[slot]) {
+          const other = 1 - slot;
+          if (filled[other]) continue;
+          slot = other;
+        }
+
+        const start = slot * 63;
+        const pts = result.landmarks[i];
+        for (let k = 0; k < 21; k++) {
+          const p = pts[k];
+          const at = start + k * 3;
+          vector[at] = p.x;
+          vector[at + 1] = p.y;
+          vector[at + 2] = p.z;
+        }
+        filled[slot] = true;
+      }
+      return vector;
+    }
+
+    async function loop(now) {
       ctx.save();
-      ctx.translate(x, y);
+      ctx.translate(640, 0);
       ctx.scale(-1, 1);
-      ctx.font = "bold 44px sans-serif";
-      ctx.fillStyle = "#FFFF00";
-      ctx.strokeStyle = "#000000";
-      ctx.lineWidth = 4;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.strokeText(text, 0, 0);
-      ctx.fillText(text, 0, 0);
+      ctx.drawImage(video, 0, 0, 640, 480);
       ctx.restore();
-    }
 
-    // 21개 관절 및 뼈대 그리기
-    function drawSkeleton(landmarks, w, h) {
-      ctx.strokeStyle = "#00FF66";
-      ctx.lineWidth = 3.5;
-      ctx.lineCap = "round";
+      let ts = Math.round(now);
+      if (ts <= lastTimestamp) ts = lastTimestamp + 1;
+      lastTimestamp = ts;
 
-      for (let conn of HAND_CONNECTIONS) {
-        ctx.beginPath();
-        ctx.moveTo(landmarks[conn[0]].x * w, landmarks[conn[0]].y * h);
-        ctx.lineTo(landmarks[conn[1]].x * w, landmarks[conn[1]].y * h);
-        ctx.stroke();
+      const result = landmarker.detectForVideo(canvas, ts);
+      if (result?.landmarks?.length) {
+        drawSkeleton(result.landmarks);
       }
 
-      for (let pt of landmarks) {
-        ctx.beginPath();
-        ctx.arc(pt.x * w, pt.y * h, 4.5, 0, 2 * Math.PI);
-        ctx.fillStyle = "#FF0055";
-        ctx.fill();
-        ctx.strokeStyle = "#FFFFFF";
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-      }
-    }
+      const vector = toRawVector(result);
+      buffer.push(vector);
 
-    // 문자 인식 및 1초 간격 입력 제어
-    function processRecognition(detectedChar) {
-      currentLetter = detectedChar || '';
+      if (!isBusy) {
+        isBusy = true;
+        try {
+          const aggregated = buffer.value();
+          let predictedLabel = null;
+          let confidence = 0;
 
-      if (!detectedChar) {
-        stableChar = null;
-        stableCount = 0;
-        return;
-      }
+          if (aggregated && vector) {
+            const feat = transform(aggregated);
+            const tensor = new ort.Tensor("float32", feat, [1, 126]);
+            const output = await session.run({ input: tensor });
+            const probs = output.probabilities.data;
 
-      if (detectedChar === stableChar) {
-        stableCount++;
-      } else {
-        stableChar = detectedChar;
-        stableCount = 1;
-      }
-
-      const now = performance.now();
-
-      // 한 문자가 입력된 후 1초 후에 다음 글자 입력 허용
-      if (stableCount >= STABLE_REQUIRED && (now - lastInputTime >= COOLDOWN_MS)) {
-        sentence += stableChar;
-        recognizedTextEl.textContent = sentence;
-
-        if (window.AppInventor && typeof window.AppInventor.setWebViewString === 'function') {
-          window.AppInventor.setWebViewString(sentence);
-        }
-
-        lastInputTime = now;
-        stableCount = 0;
-      }
-    }
-
-    // Clear 버튼 클릭 시 전체 삭제
-    clearBtn.addEventListener('click', () => {
-      sentence = '';
-      recognizedTextEl.textContent = '';
-      if (window.AppInventor && typeof window.AppInventor.setWebViewString === 'function') {
-        window.AppInventor.setWebViewString('');
-      }
-    });
-
-    // 메인 루프
-    function onFrame() {
-      if (video.videoWidth && (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight)) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-      }
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      if (handLandmarker && video.readyState >= 2) {
-        const result = handLandmarker.detectForVideo(video, performance.now());
-        if (result && result.landmarks && result.landmarks.length > 0) {
-          const rawLm = result.landmarks[0];
-          // 3D 월드 랜드마크가 있으면 3D 우선 사용, 없으면 원본 랜드마크 정규화
-          const baseLm = (result.worldLandmarks && result.worldLandmarks.length > 0) ? result.worldLandmarks[0] : rawLm;
-
-          const w = canvas.width;
-          const h = canvas.height;
-
-          // 1. 관절 뼈대 렌더링
-          drawSkeleton(rawLm, w, h);
-
-          // 2. [옵션 1] 로컬 3D 정규화 좌표 생성
-          const norm = normalizeHand(baseLm);
-
-          // 옵션 2: 학습 캡처 모드일 경우 20프레임 저장
-          if (capturingLabel && captureRemaining > 0) {
-            const vec = [];
-            for (let p of norm) vec.push(p.x, p.y, p.z);
-            customSamples.push({ label: capturingLabel, vec: vec });
-            captureRemaining--;
-
-            if (captureRemaining === 0) {
-              try { localStorage.setItem('asl_custom_samples', JSON.stringify(customSamples)); } catch(e) {}
-              updateTrainStatus();
-              capturingLabel = null;
+            let best = 0;
+            for (let i = 1; i < probs.length; i++) {
+              if (probs[i] > probs[best]) best = i;
             }
+            predictedLabel = labels[best] ?? null;
+            confidence = probs[best];
           }
 
-          // 3. 판별: 옵션 2(사용자 맞춤 데이터) 우선 -> 없으면 옵션 1(정규화 3D 규칙 엔진)
-          let char = classifyWithCustomKNN(norm);
-          if (!char) {
-            char = classifyNormalizedASL(norm);
+          currentLetterEl.textContent = predictedLabel || "-";
+
+          const committed = merger.update(predictedLabel, confidence, now / 1000);
+          if (committed) {
+            text += committed;
+            updateText();
           }
-
-          processRecognition(char);
-
-          // 4. 손목 근처에 현재 인식 중인 글자 출력
-          const wristX = rawLm[0].x * w;
-          const wristY = rawLm[0].y * h + 45;
-          drawWristText(currentLetter, wristX, wristY);
-        } else {
-          processRecognition(null);
+        } finally {
+          isBusy = false;
         }
       }
 
-      requestAnimationFrame(onFrame);
+      requestAnimationFrame(loop);
     }
 
-    // 카메라 및 모델 초기화
     async function init() {
-      const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
-      );
+      ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
+      ort.env.wasm.numThreads = 1;
 
-      const modelAssetPath = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
-      const modelOptions = {
-        runningMode: "VIDEO",
-        numHands: 1,
-        minHandDetectionConfidence: 0.35,
-        minHandPresenceConfidence: 0.35,
-        minTrackingConfidence: 0.35
-      };
+      const [labelsData, sess, fileset] = await Promise.all([
+        fetch("models/labels.json").then((r) => r.json()),
+        ort.InferenceSession.create("models/asl_svm.onnx", { executionProviders: ["wasm"] }),
+        FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm")
+      ]);
 
+      labels = labelsData;
+      session = sess;
+
+      const modelAssetPath = "models/hand_landmarker.task";
       try {
-        handLandmarker = await HandLandmarker.createFromOptions(vision, {
-          baseOptions: { modelAssetPath: modelAssetPath, delegate: "GPU" },
-          ...modelOptions
+        landmarker = await HandLandmarker.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath, delegate: "GPU" },
+          runningMode: "VIDEO",
+          numHands: 2,
+          minHandDetectionConfidence: 0.7,
+          minHandPresenceConfidence: 0.7,
+          minTrackingConfidence: 0.7
         });
-      } catch (e) {
-        handLandmarker = await HandLandmarker.createFromOptions(vision, {
-          baseOptions: { modelAssetPath: modelAssetPath, delegate: "CPU" },
-          ...modelOptions
+      } catch (gpuErr) {
+        landmarker = await HandLandmarker.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath, delegate: "CPU" },
+          runningMode: "VIDEO",
+          numHands: 2,
+          minHandDetectionConfidence: 0.7,
+          minHandPresenceConfidence: 0.7,
+          minTrackingConfidence: 0.7
         });
       }
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }
+          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+          audio: false
         });
         video.srcObject = stream;
         await video.play();
-      } catch (err) {
-        const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
-        video.srcObject = fallbackStream;
+      } catch (camErr) {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+          audio: false
+        });
+        video.srcObject = stream;
         await video.play();
       }
 
-      requestAnimationFrame(onFrame);
+      requestAnimationFrame(loop);
     }
 
-    window.addEventListener('DOMContentLoaded', init);
+    window.addEventListener("DOMContentLoaded", init);
   </script>
 </body>
 </html>

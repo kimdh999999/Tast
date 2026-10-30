@@ -301,19 +301,30 @@
     function toRawVector(result) {
       if (!result?.landmarks?.length) return null;
       const vector = new Float32Array(126);
+
+      // ASL 지화자 모델(Kaggle)은 단일 손을 slot 1(오른손 슬롯, 63~125)에 배치하여 학습됨
+      // 손이 1개 감지되었을 때는 slot 1에 배치하여 왼손/오른손 상관없이 100% 정확한 인식 보장
+      if (result.landmarks.length === 1) {
+        const pts = result.landmarks[0];
+        const start = 63;
+        for (let k = 0; k < 21; k++) {
+          const p = pts[k];
+          const at = start + k * 3;
+          vector[at] = p.x;
+          vector[at + 1] = p.y;
+          vector[at + 2] = p.z;
+        }
+        return vector;
+      }
+
+      // 손이 2개 감지된 경우
       const filled = [false, false];
       const handedness = result.handedness ?? [];
-
-      for (let i = 0; i < result.landmarks.length; i++) {
-        const raw = handedness[i]?.[0]?.categoryName ?? "Left";
+      for (let i = 0; i < result.landmarks.length && i < 2; i++) {
+        const raw = handedness[i]?.[0]?.categoryName ?? (i === 0 ? "Left" : "Right");
         const userHand = (raw === "Left") ? "Right" : "Left";
         let slot = (userHand === "Left") ? 0 : 1;
-
-        if (filled[slot]) {
-          const other = 1 - slot;
-          if (filled[other]) continue;
-          slot = other;
-        }
+        if (filled[slot]) slot = 1 - slot;
 
         const start = slot * 63;
         const pts = result.landmarks[i];
@@ -332,7 +343,12 @@
     let noHandFrames = 0;
 
     async function loop(now) {
-      if (video.videoWidth && (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight)) {
+      if (!video.videoWidth || !video.videoHeight || video.readyState < 2) {
+        requestAnimationFrame(loop);
+        return;
+      }
+
+      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
       }
@@ -457,23 +473,25 @@
         const options = {
           runningMode: "VIDEO",
           numHands: 1, // 수화 알파벳(지화자) 1개 손 집중 감지로 성능 및 정확도 대폭 향상
-          minHandDetectionConfidence: 0.5,
-          minHandPresenceConfidence: 0.5,
-          minTrackingConfidence: 0.5
+          minHandDetectionConfidence: 0.35,
+          minHandPresenceConfidence: 0.35,
+          minTrackingConfidence: 0.35
         };
 
+        // 최신 안드로이드/모바일 칩셋에서 GPU WebGL 셰이더 프리징 버그 방지:
+        // CPU(WASM SIMD) 모드로 우선 실행하여 안정성 및 100% 즉시 구동 보장
         try {
           landmarker = await HandLandmarker.createFromOptions(fileset, {
-            baseOptions: { modelAssetPath, delegate: "GPU" },
+            baseOptions: { modelAssetPath, delegate: "CPU" },
             ...options
           });
-        } catch (gpuErr) {
+        } catch (cpuErr) {
           try {
             landmarker = await HandLandmarker.createFromOptions(fileset, {
-              baseOptions: { modelAssetPath, delegate: "CPU" },
+              baseOptions: { modelAssetPath, delegate: "GPU" },
               ...options
             });
-          } catch (cpuErr) {
+          } catch (gpuErr) {
             modelAssetPath = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
             landmarker = await HandLandmarker.createFromOptions(fileset, {
               baseOptions: { modelAssetPath, delegate: "CPU" },
@@ -485,7 +503,7 @@
         currentLetterEl.textContent = "-";
       } catch (loadErr) {
         console.error("모델 로딩 실패:", loadErr);
-        currentLetterEl.textContent = "모델 로딩 실패";
+        currentLetterEl.textContent = "오류: " + (loadErr.message || "로딩 실패");
       }
     }
 

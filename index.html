@@ -272,6 +272,9 @@
       if (window.AppInventor && typeof window.AppInventor.setWebViewString === "function") {
         window.AppInventor.setWebViewString(text);
       }
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: "ASL_TEXT", text: text }, "*");
+      }
     }
 
     btnSpace.addEventListener("click", () => { text += " "; updateText(); });

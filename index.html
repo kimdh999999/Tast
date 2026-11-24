@@ -275,6 +275,9 @@
       if (window.parent && window.parent !== window) {
         window.parent.postMessage({ type: "ASL_TEXT", text: text }, "*");
       }
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ type: "ASL_TEXT", text: text }, "*");
+      }
     }
 
     btnSpace.addEventListener("click", () => { text += " "; updateText(); });
@@ -439,21 +442,23 @@
       currentLetterEl.textContent = "AI 로딩 중...";
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-            facingMode: "user"
-          },
-          audio: false
-        });
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
+            audio: false
+          });
+        } catch (firstErr) {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        }
         video.srcObject = stream;
         await video.play();
 
         canvas.width = video.videoWidth || 640;
         canvas.height = video.videoHeight || 480;
       } catch (camErr) {
-        currentLetterEl.textContent = "카메라 오류";
+        currentLetterEl.textContent = "카메라 오류 (" + (camErr.name || "확인필요") + ")";
+        console.error(camErr);
         return;
       }
 
